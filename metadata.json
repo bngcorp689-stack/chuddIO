@@ -1,0 +1,5 @@
+{
+  "name": "ChuddIO",
+  "description": "A multiplayer .io game with levels, icons, and real-time competition.",
+  "requestFramePermissions": []
+}
