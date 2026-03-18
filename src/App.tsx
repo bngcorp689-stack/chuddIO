@@ -63,12 +63,12 @@ export default function App() {
       }
 
       const soundPaths: { [key: string]: string } = {
-        eatFood: `/assets/eat-food.mp3?v=${Date.now()}`,
-        eatPlayer: `/assets/eat-player.mp3?v=${Date.now()}`,
-        levelUp: `/assets/level-up.mp3?v=${Date.now()}`,
-        death: `/assets/death.mp3?v=${Date.now()}`,
-        boost: `/assets/Boost.mp3?v=${Date.now()}`,
-        ambient: `/assets/ambient.mp3?v=${Date.now()}`
+        eatFood: '/assets/eat-food.mp3',
+        eatPlayer: '/assets/eat-player.mp3',
+        levelUp: '/assets/level-up.mp3',
+        death: '/assets/death.mp3',
+        boost: '/assets/Boost.mp3',
+        ambient: '/assets/ambient.mp3'
       };
 
       for (const [key, src] of Object.entries(soundPaths)) {
@@ -80,8 +80,16 @@ export default function App() {
           try {
             attempts++;
             console.log(`Fetching audio: ${key} from ${src} (attempt ${attempts})`);
-            const response = await fetch(src, { cache: 'no-store' });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            // Try fetching without cache-busting first
+            const response = await fetch(src).catch(e => {
+              console.error(`Network error fetching ${src}:`, e);
+              throw e;
+            });
+            
+            if (!response.ok) {
+              console.warn(`Failed to fetch ${src}, status: ${response.status} ${response.statusText}`);
+              throw new Error(`HTTP ${response.status}`);
+            }
             
             const contentType = response.headers.get('content-type');
             console.log(`${key} response content-type: ${contentType}`);

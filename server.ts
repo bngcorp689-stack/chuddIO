@@ -311,27 +311,45 @@ async function startServer() {
   
   // Assets health check
   app.get("/api/assets-check", (req, res) => {
-    const assetsPath = path.join(publicPath, "assets");
-    if (fs.existsSync(assetsPath)) {
-      const files = fs.readdirSync(assetsPath).map(file => {
-        const stats = fs.statSync(path.join(assetsPath, file));
-        return { name: file, size: stats.size };
-      });
-      res.json({ status: "ok", path: assetsPath, files });
-    } else {
-      res.status(404).json({ status: "error", message: "Assets directory not found", path: assetsPath });
-    }
+    const assetsPath = path.join(process.cwd(), "public", "assets");
+    const distAssetsPath = path.join(process.cwd(), "dist", "assets");
+    
+    const publicFiles = fs.existsSync(assetsPath) ? fs.readdirSync(assetsPath) : [];
+    const distFiles = fs.existsSync(distAssetsPath) ? fs.readdirSync(distAssetsPath) : [];
+    
+    res.json({ 
+      status: "ok", 
+      publicAssets: { path: assetsPath, files: publicFiles },
+      distAssets: { path: distAssetsPath, files: distFiles },
+      env: process.env.NODE_ENV
+    });
   });
 
-  // Serve assets explicitly with correct headers
-  app.use("/assets", express.static(path.join(publicPath, "assets"), {
-    setHeaders: (res, path) => {
-      if (path.endsWith(".mp3")) {
-        res.setHeader("Content-Type", "audio/mpeg");
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      }
+  // Log all asset requests
+  app.use("/assets", (req, res, next) => {
+    console.log(`Asset request: ${req.url}`);
+    next();
+  });
+
+  // Serve assets from public/assets or dist/assets
+  app.use("/assets", (req, res, next) => {
+    const assetName = req.url.startsWith("/") ? req.url.slice(1) : req.url;
+    const publicAssetPath = path.join(process.cwd(), "public", "assets", assetName);
+    const distAssetPath = path.join(process.cwd(), "dist", "assets", assetName);
+    
+    if (fs.existsSync(publicAssetPath)) {
+      console.log(`Serving asset from public: ${assetName}`);
+      if (assetName.endsWith(".mp3")) res.setHeader("Content-Type", "audio/mpeg");
+      return res.sendFile(publicAssetPath);
+    } else if (fs.existsSync(distAssetPath)) {
+      console.log(`Serving asset from dist: ${assetName}`);
+      if (assetName.endsWith(".mp3")) res.setHeader("Content-Type", "audio/mpeg");
+      return res.sendFile(distAssetPath);
+    } else {
+      console.warn(`Asset not found: ${assetName}`);
+      next();
     }
-  }));
+  });
 
   // Static files
   app.use(express.static(publicPath));
