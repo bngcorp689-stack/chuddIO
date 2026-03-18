@@ -363,6 +363,15 @@ async function startServer() {
     });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    const distAssetsPath = path.join(distPath, 'assets');
+    console.log("Production mode: distPath =", distPath);
+    if (fs.existsSync(distAssetsPath)) {
+      console.log("Production assets found at:", distAssetsPath);
+      console.log("Files in dist/assets:", fs.readdirSync(distAssetsPath));
+    } else {
+      console.error("CRITICAL: Production assets NOT found at:", distAssetsPath);
+    }
+
     app.use(express.static(distPath, {
       setHeaders: (res, path) => {
         if (path.endsWith(".mp3")) {

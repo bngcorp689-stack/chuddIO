@@ -14,9 +14,25 @@ export default function App() {
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [showNewRound, setShowNewRound] = useState(false);
   const [roundTime, setRoundTime] = useState('0:00');
-  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [soundStatus, setSoundStatus] = useState<{ [key: string]: string }>({});
+  const [audioReady, setAudioReady] = useState(false);
 
-  const keys = useRef<{ [key: string]: boolean }>({});
+  const beep = () => {
+    if (!audioContextRef.current) return;
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+    const osc = audioContextRef.current.createOscillator();
+    const gain = audioContextRef.current.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, audioContextRef.current.currentTime);
+    gain.gain.setValueAtTime(0.1, audioContextRef.current.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioContextRef.current.currentTime + 0.5);
+    osc.connect(gain);
+    gain.connect(audioContextRef.current.destination);
+    osc.start();
+    osc.stop(audioContextRef.current.currentTime + 0.5);
+  };
   const camera = useRef({ x: 0, y: 0 });
   const icons = useRef<{ [key: number]: HTMLImageElement }>({});
   const bgImage = useRef<HTMLImageElement | null>(null);
@@ -83,14 +99,17 @@ export default function App() {
                 const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
                 audioBuffersRef.current[key] = audioBuffer;
                 console.log(`Successfully decoded audio: ${key} (attempt ${attempts})`);
+                setSoundStatus(prev => ({ ...prev, [key]: 'OK' }));
                 success = true;
               } catch (decodeErr) {
                 console.error(`decodeAudioData failed for ${key}:`, decodeErr);
+                setSoundStatus(prev => ({ ...prev, [key]: 'DECODE_ERROR' }));
                 throw decodeErr; // Trigger retry
               }
             }
           } catch (err) {
             console.error(`Attempt ${attempts} failed for ${key} (${src}):`, err);
+            setSoundStatus(prev => ({ ...prev, [key]: 'FETCH_ERROR' }));
             if (attempts < maxAttempts) {
               await new Promise(resolve => setTimeout(resolve, 1000 * attempts)); // Exponential backoff
             } else {
@@ -99,6 +118,7 @@ export default function App() {
           }
         }
       }
+      setAudioReady(true);
     };
 
     initAudio();
@@ -530,6 +550,20 @@ export default function App() {
               >
                 🔊 Test Sound System
               </button>
+              <button 
+                onClick={beep}
+                className="text-emerald-500/50 hover:text-emerald-400 text-[10px] transition-colors uppercase tracking-[0.2em] font-bold mt-1"
+              >
+                🔔 Test Beep (Sine Wave)
+              </button>
+              <div className="mt-4 text-[10px] text-neutral-600 font-mono grid grid-cols-2 gap-x-4">
+                {Object.entries(soundStatus).map(([key, status]) => (
+                  <div key={key} className="flex justify-between">
+                    <span>{key}:</span>
+                    <span className={status === 'OK' ? 'text-emerald-500' : 'text-red-500'}>{status}</span>
+                  </div>
+                ))}
+              </div>
               {joinMessage && (
                 <div className="bg-red-500/20 border border-red-500/50 p-3 rounded-xl w-full">
                   <p className="text-red-400 text-xs text-center font-bold">{joinMessage}</p>
