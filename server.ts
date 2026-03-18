@@ -352,7 +352,10 @@ async function startServer() {
       try {
         let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
         template = await vite.transformIndexHtml(req.originalUrl, template);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+        res.status(200).set({ 
+          'Content-Type': 'text/html',
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+        }).end(template);
       } catch (e) {
         vite.ssrFixStacktrace(e as Error);
         next(e);
@@ -368,6 +371,7 @@ async function startServer() {
       }
     }));
     app.get('*', (req, res) => {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

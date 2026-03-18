@@ -47,12 +47,12 @@ export default function App() {
       }
 
       const soundPaths: { [key: string]: string } = {
-        eatFood: "/assets/eat-food.mp3",
-        eatPlayer: "/assets/eat-player.mp3",
-        levelUp: "/assets/level-up.mp3",
-        death: "/assets/death.mp3",
-        boost: "/assets/Boost.mp3",
-        ambient: "/assets/ambient.mp3"
+        eatFood: `/assets/eat-food.mp3?v=${Date.now()}`,
+        eatPlayer: `/assets/eat-player.mp3?v=${Date.now()}`,
+        levelUp: `/assets/level-up.mp3?v=${Date.now()}`,
+        death: `/assets/death.mp3?v=${Date.now()}`,
+        boost: `/assets/Boost.mp3?v=${Date.now()}`,
+        ambient: `/assets/ambient.mp3?v=${Date.now()}`
       };
 
       for (const [key, src] of Object.entries(soundPaths)) {
