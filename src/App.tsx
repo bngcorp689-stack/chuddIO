@@ -39,26 +39,6 @@ export default function App() {
       .then(data => console.log("Assets Health Check:", data))
       .catch(err => console.error("Assets Health Check Failed:", err));
 
-    // Test if audio files are accessible
-    fetch("/assets/ambient.mp3")
-      .then(async res => {
-        const contentType = res.headers.get("content-type");
-        console.log("Audio fetch test (/assets/ambient.mp3):", res.status, res.statusText, contentType);
-        if (contentType && contentType.includes("text/html")) {
-          const text = await res.text();
-          console.error("Audio fetch returned HTML instead of MP3! First 100 chars:", text.substring(0, 100));
-        } else {
-          const blob = await res.blob();
-          console.log("Audio fetch success! Size:", blob.size, "bytes");
-          if (blob.size < 100) {
-            console.warn("Audio file seems too small, might be corrupted or empty.");
-          }
-        }
-      })
-      .catch(err => {
-        console.error("Audio fetch test failed:", err);
-      });
-
     // Load sounds
     const soundPaths: { [key: string]: string } = {
       eatFood: "/assets/eat-food.mp3",
@@ -69,24 +49,46 @@ export default function App() {
       death: "/assets/death.mp3"
     };
 
-    Object.entries(soundPaths).forEach(([key, src]) => {
-      const audio = new Audio();
-      
-      audio.addEventListener('error', (e) => {
-        console.error(`Audio error for ${key} (${src}):`, {
-          code: audio.error?.code,
-          message: audio.error?.message
+    Object.entries(soundPaths).forEach(async ([key, src]) => {
+      try {
+        const response = await fetch(src);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("text/html")) {
+          throw new Error("Server returned HTML instead of audio");
+        }
+        
+        const blob = await response.blob();
+        console.log(`Audio blob fetched for ${key}: size=${blob.size}, type=${blob.type}`);
+        const blobUrl = URL.createObjectURL(blob);
+        
+        const audio = new Audio();
+        const source = document.createElement('source');
+        source.src = blobUrl;
+        source.type = blob.type || "audio/mpeg";
+        audio.appendChild(source);
+        audio.preload = "auto";
+        audio.load();
+        
+        audio.addEventListener('error', (e) => {
+          const err = audio.error;
+          let codeMsg = "Unknown error";
+          if (err) {
+            const codes = ["", "MEDIA_ERR_ABORTED", "MEDIA_ERR_NETWORK", "MEDIA_ERR_DECODE", "MEDIA_ERR_SRC_NOT_SUPPORTED"];
+            codeMsg = `Code: ${err.code} (${codes[err.code] || "UNKNOWN"}), Msg: ${err.message}`;
+          }
+          console.error(`Audio error for ${key} (${src}):`, codeMsg);
         });
-      });
 
-      audio.src = src;
-      audio.preload = "auto";
-      
-      if (key === 'ambient') {
-        audio.loop = true;
-        audio.volume = 0.4;
+        if (key === 'ambient') {
+          audio.loop = true;
+          audio.volume = 0.3;
+        }
+        soundRefs.current[key] = audio;
+        console.log(`Successfully loaded audio blob for: ${key}`);
+      } catch (err) {
+        console.error(`Failed to load audio for ${key}:`, err);
       }
-      soundRefs.current[key] = audio;
     });
 
     // Load icons - Mapping provided images to levels
@@ -133,28 +135,44 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
+        audio.pause();
+        if (audio.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audio.src);
+        }
+      });
     };
   }, []);
 
   const handleJoin = () => {
     // Prime audio for browser autoplay policy
-    Object.entries(soundRefs.current).forEach(([key, audio]) => {
-      if (audio.src && !audio.error) {
-        console.log(`Priming audio: ${key} (${audio.src}) - readyState: ${audio.readyState}`);
+    Object.entries(soundRefs.current).forEach(([key, audio]: [string, HTMLAudioElement]) => {
+      const src = audio.currentSrc || audio.src;
+      if (src && !audio.error) {
+        console.log(`Priming audio: ${key} (${src}) - readyState: ${audio.readyState}`);
+        if (audio.readyState < 1) {
+          audio.load();
+        }
         audio.play().then(() => {
           audio.pause();
           audio.currentTime = 0;
           console.log(`Successfully primed: ${key}`);
+          if (key === 'ambient') {
+            audio.play().catch(e => console.warn("Failed to play ambient after priming:", e));
+          }
         }).catch(e => {
           if (e.name !== 'AbortError') {
             console.warn(`Audio priming failed for ${key}:`, e);
           }
         });
       } else if (audio.error) {
-        console.error(`Cannot prime ${key} due to error:`, {
-          code: audio.error.code,
-          message: audio.error.message
-        });
+        const err = audio.error;
+        let codeMsg = "Unknown error";
+        if (err) {
+          const codes = ["", "MEDIA_ERR_ABORTED", "MEDIA_ERR_NETWORK", "MEDIA_ERR_DECODE", "MEDIA_ERR_SRC_NOT_SUPPORTED"];
+          codeMsg = `Code: ${err.code} (${codes[err.code] || "UNKNOWN"}), Msg: ${err.message}`;
+        }
+        console.error(`Cannot prime ${key} due to error:`, codeMsg);
       }
     });
 
