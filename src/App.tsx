@@ -63,12 +63,16 @@ export default function App() {
         const blobUrl = URL.createObjectURL(blob);
         
         const audio = new Audio();
-        const source = document.createElement('source');
-        source.src = blobUrl;
-        source.type = blob.type || "audio/mpeg";
-        audio.appendChild(source);
+        audio.src = blobUrl;
         audio.preload = "auto";
-        audio.load();
+        audio.crossOrigin = "anonymous";
+        
+        // Hidden but in DOM can help some browsers
+        audio.style.position = 'fixed';
+        audio.style.top = '-100px';
+        audio.style.left = '-100px';
+        audio.style.opacity = '0';
+        document.body.appendChild(audio);
         
         audio.addEventListener('error', (e) => {
           const err = audio.error;
@@ -80,12 +84,26 @@ export default function App() {
           console.error(`Audio error for ${key} (${src}):`, codeMsg);
         });
 
+        // Log state changes
+        audio.addEventListener('loadstart', () => console.log(`${key} loadstart`));
+        audio.addEventListener('loadedmetadata', () => console.log(`${key} loadedmetadata, duration: ${audio.duration}`));
+        audio.addEventListener('canplaythrough', () => console.log(`${key} canplaythrough`));
+
         if (key === 'ambient') {
           audio.loop = true;
-          audio.volume = 0.3;
+          audio.volume = 0.5;
+        } else {
+          audio.volume = 1.0;
         }
+        
+        audio.muted = true; // Start muted to help with autoplay
+        setTimeout(() => {
+          console.log(`Forcing load for ${key} after delay...`);
+          audio.load();
+        }, 100);
+        
         soundRefs.current[key] = audio;
-        console.log(`Successfully loaded audio blob for: ${key}`);
+        console.log(`Successfully initialized audio for: ${key}`);
       } catch (err) {
         console.error(`Failed to load audio for ${key}:`, err);
       }
@@ -132,17 +150,50 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
+    const unlockAudio = () => {
+      console.log("Unlocking audio system via mousedown...");
+      Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
+        if (audio.readyState < 1) audio.load();
+        audio.muted = false;
+        console.log(`Unlocking ${audio.src} (readyState: ${audio.readyState})`);
+        audio.play().then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+          console.log(`Successfully unlocked: ${audio.src}`);
+        }).catch(e => console.warn(`Unlock failed for ${audio.src}:`, e));
+      });
+      window.removeEventListener('mousedown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+    window.addEventListener('mousedown', unlockAudio);
+    window.addEventListener('touchstart', unlockAudio);
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('mousedown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
       Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
         audio.pause();
         if (audio.src.startsWith('blob:')) {
           URL.revokeObjectURL(audio.src);
         }
+        if (audio.parentNode) {
+          audio.parentNode.removeChild(audio);
+        }
       });
     };
   }, []);
+
+  const [isMuted, setIsMuted] = useState(false);
+
+  const toggleMute = () => {
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
+      audio.muted = newMuted;
+    });
+  };
 
   const handleJoin = () => {
     // Prime audio for browser autoplay policy
@@ -151,16 +202,26 @@ export default function App() {
       if (src && !audio.error) {
         console.log(`Priming audio: ${key} (${src}) - readyState: ${audio.readyState}`);
         if (audio.readyState < 1) {
+          console.log(`Forcing load for ${key} because readyState is ${audio.readyState}`);
           audio.load();
         }
+        audio.muted = false;
+        if (key !== 'ambient') audio.volume = 1.0;
+        console.log(`Calling play() for ${key}...`);
         audio.play().then(() => {
           audio.pause();
           audio.currentTime = 0;
           console.log(`Successfully primed: ${key}`);
           if (key === 'ambient') {
-            audio.play().catch(e => console.warn("Failed to play ambient after priming:", e));
+            audio.volume = 0.5;
+            audio.muted = false;
+            console.log("Starting ambient playback (with delay)...");
+            setTimeout(() => {
+              audio.play().catch(e => console.warn("Failed to play ambient after priming:", e));
+            }, 200);
           }
         }).catch(e => {
+          console.error(`Play promise rejected for ${key}:`, e);
           if (e.name !== 'AbortError') {
             console.warn(`Audio priming failed for ${key}:`, e);
           }
@@ -467,6 +528,21 @@ export default function App() {
               >
                 Reset Account Data
               </button>
+              <button 
+                onClick={() => {
+                  const audio = soundRefs.current['eatFood'];
+                  if (audio) {
+                    console.log("Manual sound test (eatFood)... readyState:", audio.readyState, "muted:", audio.muted, "volume:", audio.volume);
+                    audio.currentTime = 0;
+                    audio.play().then(() => console.log("Manual play success")).catch(e => console.error("Manual play failed:", e));
+                  } else {
+                    console.warn("eatFood audio not found for test");
+                  }
+                }}
+                className="text-emerald-500/50 hover:text-emerald-400 text-[10px] transition-colors uppercase tracking-[0.2em] font-bold mt-2"
+              >
+                🔊 Test Sound System
+              </button>
               {joinMessage && (
                 <div className="bg-red-500/20 border border-red-500/50 p-3 rounded-xl w-full">
                   <p className="text-red-400 text-xs text-center font-bold">{joinMessage}</p>
@@ -514,6 +590,13 @@ export default function App() {
                 })()}
               </p>
             </div>
+
+            <button 
+              onClick={toggleMute}
+              className="bg-black/50 backdrop-blur-md p-4 rounded-2xl border border-white/10 text-white hover:bg-white/10 transition-colors"
+            >
+              {isMuted ? "🔇" : "🔊"}
+            </button>
           </div>
 
           <div className="absolute top-4 right-4 bg-black/50 backdrop-blur-md p-4 rounded-2xl border border-white/10 text-white w-48">
