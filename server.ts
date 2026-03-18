@@ -306,12 +306,12 @@ async function startServer() {
   }, 1000 / 60);
 
   // Static files from public
-  const publicPath = path.resolve(__dirname, "public");
+  const publicPath = path.join(process.cwd(), "public");
   console.log("Serving static files from:", publicPath);
   
   // Assets health check
   app.get("/api/assets-check", (req, res) => {
-    const assetsPath = path.join(process.cwd(), "public", "assets");
+    const assetsPath = path.join(publicPath, "assets");
     if (fs.existsSync(assetsPath)) {
       const files = fs.readdirSync(assetsPath).map(file => {
         const stats = fs.statSync(path.join(assetsPath, file));
@@ -323,14 +323,18 @@ async function startServer() {
     }
   });
 
-  // Static files
-  app.use(express.static(publicPath, {
+  // Serve assets explicitly with correct headers
+  app.use("/assets", express.static(path.join(publicPath, "assets"), {
     setHeaders: (res, path) => {
       if (path.endsWith(".mp3")) {
         res.setHeader("Content-Type", "audio/mpeg");
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       }
     }
   }));
+
+  // Static files
+  app.use(express.static(publicPath));
 
   if (process.env.NODE_ENV !== "production") {
     console.log("Initializing Vite in SPA mode...");

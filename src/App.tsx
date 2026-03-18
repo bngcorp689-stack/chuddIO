@@ -33,6 +33,12 @@ export default function App() {
 
   useEffect(() => {
     const initAudio = async () => {
+      // Check assets health
+      fetch("/api/assets-check")
+        .then(res => res.json())
+        .then(data => console.log("Assets Health Check:", data))
+        .catch(err => console.error("Assets Health Check Failed:", err));
+
       try {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         console.log("AudioContext initialized:", audioContextRef.current.state);
@@ -50,18 +56,47 @@ export default function App() {
       };
 
       for (const [key, src] of Object.entries(soundPaths)) {
-        try {
-          const response = await fetch(src);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const arrayBuffer = await response.arrayBuffer();
-          
-          if (audioContextRef.current) {
-            const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-            audioBuffersRef.current[key] = audioBuffer;
-            console.log(`Successfully decoded audio: ${key}`);
+        let success = false;
+        let attempts = 0;
+        const maxAttempts = 3;
+
+        while (!success && attempts < maxAttempts) {
+          try {
+            attempts++;
+            console.log(`Fetching audio: ${key} from ${src} (attempt ${attempts})`);
+            const response = await fetch(src, { cache: 'no-store' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            
+            const contentType = response.headers.get('content-type');
+            console.log(`${key} response content-type: ${contentType}`);
+            
+            const arrayBuffer = await response.arrayBuffer();
+            console.log(`${key} fetched buffer size: ${arrayBuffer.byteLength} bytes`);
+
+            if (arrayBuffer.byteLength < 100) {
+              const text = new TextDecoder().decode(arrayBuffer.slice(0, 100));
+              console.warn(`${key} buffer is very small, might be text: ${text}`);
+            }
+            
+            if (audioContextRef.current) {
+              try {
+                const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+                audioBuffersRef.current[key] = audioBuffer;
+                console.log(`Successfully decoded audio: ${key} (attempt ${attempts})`);
+                success = true;
+              } catch (decodeErr) {
+                console.error(`decodeAudioData failed for ${key}:`, decodeErr);
+                throw decodeErr; // Trigger retry
+              }
+            }
+          } catch (err) {
+            console.error(`Attempt ${attempts} failed for ${key} (${src}):`, err);
+            if (attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempts)); // Exponential backoff
+            } else {
+              console.error(`Final failure for ${key}:`, err);
+            }
           }
-        } catch (err) {
-          console.error(`Failed to load/decode audio for ${key}:`, err);
         }
       }
     };
