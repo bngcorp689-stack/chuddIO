@@ -41,9 +41,10 @@ export default function App() {
 
     Object.entries(soundPaths).forEach(([key, src]) => {
       const audio = new Audio(src);
+      audio.preload = "auto";
       if (key === 'ambient') {
         audio.loop = true;
-        audio.volume = 0.3;
+        audio.volume = 0.4;
       }
       soundRefs.current[key] = audio;
     });
@@ -96,6 +97,14 @@ export default function App() {
   }, []);
 
   const handleJoin = () => {
+    // Prime audio for browser autoplay policy
+    Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
+      audio.play().then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+      }).catch(e => console.warn("Audio priming blocked:", e));
+    });
+
     if (!username || !password) {
       setJoinMessage("Username & password required");
       return;
