@@ -38,6 +38,43 @@ async function startServer() {
   // Parse JSON requests
   app.use(express.json());
 
+  // Serve static files from public folder FIRST
+  app.use(express.static(path.join(process.cwd(), "public")));
+
+  // Serve assets from public/assets or dist/assets
+  app.use("/assets", (req, res, next) => {
+    const assetPath = req.path.startsWith("/") ? req.path.slice(1) : req.path;
+    const publicAssetPath = path.join(process.cwd(), "public", "assets", assetPath);
+    const distAssetPath = path.join(process.cwd(), "dist", "assets", assetPath);
+    
+    console.log(`[AssetRequest] ${assetPath} - Checking paths...`);
+    
+    let finalPath = "";
+    if (fs.existsSync(distAssetPath)) {
+      finalPath = distAssetPath;
+      console.log(`[AssetRequest] Found in dist: ${assetPath}`);
+    } else if (fs.existsSync(publicAssetPath)) {
+      finalPath = publicAssetPath;
+      console.log(`[AssetRequest] Found in public: ${assetPath}`);
+    }
+
+    if (finalPath) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+      
+      // Let express detect content-type automatically, but override for mp3 if needed
+      return res.sendFile(finalPath, (err) => {
+        if (err) {
+          console.error(`[AssetRequest] Error sending file ${assetPath}:`, err);
+          if (!res.headersSent) next();
+        }
+      });
+    } else {
+      console.warn(`[AssetRequest] NOT FOUND: ${assetPath}`);
+      next();
+    }
+  });
+
   app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`);
     next();
@@ -324,35 +361,6 @@ async function startServer() {
       env: process.env.NODE_ENV
     });
   });
-
-  // Log all asset requests
-  app.use("/assets", (req, res, next) => {
-    console.log(`Asset request: ${req.url}`);
-    next();
-  });
-
-  // Serve assets from public/assets or dist/assets
-  app.use("/assets", (req, res, next) => {
-    const assetName = req.url.startsWith("/") ? req.url.slice(1) : req.url;
-    const publicAssetPath = path.join(process.cwd(), "public", "assets", assetName);
-    const distAssetPath = path.join(process.cwd(), "dist", "assets", assetName);
-    
-    if (fs.existsSync(publicAssetPath)) {
-      console.log(`Serving asset from public: ${assetName}`);
-      if (assetName.endsWith(".mp3")) res.setHeader("Content-Type", "audio/mpeg");
-      return res.sendFile(publicAssetPath);
-    } else if (fs.existsSync(distAssetPath)) {
-      console.log(`Serving asset from dist: ${assetName}`);
-      if (assetName.endsWith(".mp3")) res.setHeader("Content-Type", "audio/mpeg");
-      return res.sendFile(distAssetPath);
-    } else {
-      console.warn(`Asset not found: ${assetName}`);
-      next();
-    }
-  });
-
-  // Static files
-  app.use(express.static(publicPath));
 
   if (process.env.NODE_ENV !== "production") {
     console.log("Initializing Vite in SPA mode...");

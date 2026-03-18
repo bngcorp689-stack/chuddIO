@@ -16,10 +16,33 @@ export default function App() {
   const [roundTime, setRoundTime] = useState('0:00');
   const [soundStatus, setSoundStatus] = useState<{ [key: string]: string }>({});
   const [audioReady, setAudioReady] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<string[]>([]);
+
+  const addLog = (msg: string) => {
+    console.log(`[AudioDiag] ${msg}`);
+    setDiagnostics(prev => [...prev.slice(-9), `${new Date().toLocaleTimeString()}: ${msg}`]);
+  };
+
+  const runDiagnostics = async () => {
+    addLog("Running diagnostics...");
+    try {
+      const res = await fetch("/api/assets-check");
+      const data = await res.json();
+      addLog(`Assets check: ${JSON.stringify(data.publicAssets.files.length)} files found in public`);
+      addLog(`Environment: ${data.env}`);
+    } catch (e) {
+      addLog(`Assets check failed: ${e}`);
+    }
+  };
 
   const beep = () => {
-    if (!audioContextRef.current) return;
+    addLog("Attempting beep...");
+    if (!audioContextRef.current) {
+      addLog("Error: AudioContext not initialized");
+      return;
+    }
     if (audioContextRef.current.state === 'suspended') {
+      addLog("Resuming AudioContext...");
       audioContextRef.current.resume();
     }
     const osc = audioContextRef.current.createOscillator();
@@ -32,6 +55,7 @@ export default function App() {
     gain.connect(audioContextRef.current.destination);
     osc.start();
     osc.stop(audioContextRef.current.currentTime + 0.5);
+    addLog("Beep started");
   };
   const camera = useRef({ x: 0, y: 0 });
   const icons = useRef<{ [key: number]: HTMLImageElement }>({});
@@ -79,16 +103,18 @@ export default function App() {
         while (!success && attempts < maxAttempts) {
           try {
             attempts++;
-            console.log(`Fetching audio: ${key} from ${src} (attempt ${attempts})`);
-            // Try fetching without cache-busting first
-            const response = await fetch(src).catch(e => {
-              console.error(`Network error fetching ${src}:`, e);
+            const fullUrl = new URL(src, window.location.origin).href;
+            console.log(`Fetching audio: ${key} from ${fullUrl} (attempt ${attempts})`);
+            
+            const response = await fetch(fullUrl).catch(e => {
+              console.error(`Network error fetching ${key}:`, e);
               throw e;
             });
             
             if (!response.ok) {
-              console.warn(`Failed to fetch ${src}, status: ${response.status} ${response.statusText}`);
-              throw new Error(`HTTP ${response.status}`);
+              const statusText = `HTTP ${response.status} ${response.statusText}`;
+              console.warn(`Failed to fetch ${key}, status: ${statusText}`);
+              throw new Error(statusText);
             }
             
             const contentType = response.headers.get('content-type');
@@ -97,31 +123,29 @@ export default function App() {
             const arrayBuffer = await response.arrayBuffer();
             console.log(`${key} fetched buffer size: ${arrayBuffer.byteLength} bytes`);
 
-            if (arrayBuffer.byteLength < 100) {
+            if (arrayBuffer.byteLength < 500) {
               const text = new TextDecoder().decode(arrayBuffer.slice(0, 100));
-              console.warn(`${key} buffer is very small, might be text: ${text}`);
+              addLog(`Warning: ${key} buffer too small (${arrayBuffer.byteLength}b). Content: ${text.slice(0, 20)}...`);
             }
             
             if (audioContextRef.current) {
               try {
                 const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
                 audioBuffersRef.current[key] = audioBuffer;
-                console.log(`Successfully decoded audio: ${key} (attempt ${attempts})`);
+                console.log(`Successfully decoded audio: ${key}`);
                 setSoundStatus(prev => ({ ...prev, [key]: 'OK' }));
                 success = true;
               } catch (decodeErr) {
                 console.error(`decodeAudioData failed for ${key}:`, decodeErr);
-                setSoundStatus(prev => ({ ...prev, [key]: 'DECODE_ERROR' }));
-                throw decodeErr; // Trigger retry
+                setSoundStatus(prev => ({ ...prev, [key]: 'DECODE_ERR' }));
+                throw decodeErr;
               }
             }
-          } catch (err) {
-            console.error(`Attempt ${attempts} failed for ${key} (${src}):`, err);
-            setSoundStatus(prev => ({ ...prev, [key]: 'FETCH_ERROR' }));
+          } catch (err: any) {
+            console.error(`Attempt ${attempts} failed for ${key}:`, err);
+            setSoundStatus(prev => ({ ...prev, [key]: `ERR: ${err.message || 'Unknown'}` }));
             if (attempts < maxAttempts) {
-              await new Promise(resolve => setTimeout(resolve, 1000 * attempts)); // Exponential backoff
-            } else {
-              console.error(`Final failure for ${key}:`, err);
+              await new Promise(resolve => setTimeout(resolve, 500 * attempts));
             }
           }
         }
@@ -549,28 +573,59 @@ export default function App() {
               >
                 Reset Account Data
               </button>
-              <button 
-                onClick={() => {
-                  console.log("Manual sound test (eatFood)...");
-                  playSound('eatFood');
-                }}
-                className="text-emerald-500/50 hover:text-emerald-400 text-[10px] transition-colors uppercase tracking-[0.2em] font-bold mt-2"
-              >
-                🔊 Test Sound System
-              </button>
-              <button 
-                onClick={beep}
-                className="text-emerald-500/50 hover:text-emerald-400 text-[10px] transition-colors uppercase tracking-[0.2em] font-bold mt-1"
-              >
-                🔔 Test Beep (Sine Wave)
-              </button>
-              <div className="mt-4 text-[10px] text-neutral-600 font-mono grid grid-cols-2 gap-x-4">
-                {Object.entries(soundStatus).map(([key, status]) => (
-                  <div key={key} className="flex justify-between">
-                    <span>{key}:</span>
-                    <span className={status === 'OK' ? 'text-emerald-500' : 'text-red-500'}>{status}</span>
+              <div className="flex flex-col gap-2 mt-4">
+                <button 
+                  onClick={() => {
+                    addLog("Manual sound test...");
+                    playSound('eatFood');
+                  }}
+                  className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 text-[10px] py-2 px-4 rounded-lg transition-colors uppercase tracking-[0.2em] font-bold"
+                >
+                  🔊 Test Sound System
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button 
+                    onClick={beep}
+                    className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 text-[10px] py-2 px-4 rounded-lg transition-colors uppercase tracking-[0.2em] font-bold"
+                  >
+                    🔔 Beep Test
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const url = new URL('/assets/eat-food.mp3', window.location.origin).href;
+                      window.open(url, '_blank');
+                    }}
+                    className="bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 text-[10px] py-2 px-4 rounded-lg transition-colors uppercase tracking-[0.2em] font-bold"
+                  >
+                    🔗 Link
+                  </button>
+                  <button 
+                    onClick={runDiagnostics}
+                    className="bg-neutral-500/10 hover:bg-neutral-500/20 text-neutral-500 text-[10px] py-2 px-4 rounded-lg transition-colors uppercase tracking-[0.2em] font-bold"
+                  >
+                    🔍 Diag
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 p-3 bg-black/40 rounded-xl border border-white/5">
+                <p className="text-[9px] text-neutral-500 uppercase tracking-widest mb-2 font-bold">Audio Status</p>
+                <div className="grid grid-cols-1 gap-1">
+                  {Object.entries(soundStatus).map(([key, status]) => (
+                    <div key={key} className="flex justify-between text-[10px] font-mono">
+                      <span className="text-neutral-400">{key}:</span>
+                      <span className={status === 'OK' ? 'text-emerald-500' : 'text-red-400'}>{status}</span>
+                    </div>
+                  ))}
+                </div>
+                {diagnostics.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-white/5">
+                    <p className="text-[9px] text-neutral-500 uppercase tracking-widest mb-1 font-bold">Logs</p>
+                    {diagnostics.map((log, i) => (
+                      <p key={i} className="text-[9px] text-neutral-600 font-mono leading-tight">{log}</p>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
               {joinMessage && (
                 <div className="bg-red-500/20 border border-red-500/50 p-3 rounded-xl w-full">
