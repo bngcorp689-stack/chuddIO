@@ -309,26 +309,28 @@ async function startServer() {
   const publicPath = path.resolve(__dirname, "public");
   console.log("Serving static files from:", publicPath);
   
-  // Verify assets exist
-  const assetsPath = path.join(publicPath, "assets");
-  if (fs.existsSync(assetsPath)) {
-    const files = fs.readdirSync(assetsPath);
-    console.log("Assets directory found:", files);
-    files.forEach(file => {
-      const filePath = path.join(assetsPath, file);
-      try {
-        const stats = fs.statSync(filePath);
-        console.log(`File: ${file}, Size: ${stats.size} bytes`);
-      } catch (e) {
-        console.error(`Error reading file ${file}:`, e);
-      }
-    });
-  } else {
-    console.error("Assets directory NOT found at:", assetsPath);
-  }
+  // Assets health check
+  app.get("/api/assets-check", (req, res) => {
+    const assetsPath = path.join(process.cwd(), "public", "assets");
+    if (fs.existsSync(assetsPath)) {
+      const files = fs.readdirSync(assetsPath).map(file => {
+        const stats = fs.statSync(path.join(assetsPath, file));
+        return { name: file, size: stats.size };
+      });
+      res.json({ status: "ok", path: assetsPath, files });
+    } else {
+      res.status(404).json({ status: "error", message: "Assets directory not found", path: assetsPath });
+    }
+  });
 
-  app.use("/assets", express.static(assetsPath));
-  app.use(express.static(publicPath));
+  // Static files
+  app.use(express.static(publicPath, {
+    setHeaders: (res, path) => {
+      if (path.endsWith(".mp3")) {
+        res.setHeader("Content-Type", "audio/mpeg");
+      }
+    }
+  }));
 
   if (process.env.NODE_ENV !== "production") {
     console.log("Initializing Vite in SPA mode...");
@@ -354,7 +356,13 @@ async function startServer() {
     });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders: (res, path) => {
+        if (path.endsWith(".mp3")) {
+          res.setHeader("Content-Type", "audio/mpeg");
+        }
+      }
+    }));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });

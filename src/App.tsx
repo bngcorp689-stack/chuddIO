@@ -29,10 +29,31 @@ export default function App() {
   const soundRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
 
   useEffect(() => {
+    const audioTest = new Audio();
+    console.log("Audio support check (audio/mpeg):", audioTest.canPlayType("audio/mpeg"));
+    console.log("Audio support check (audio/mp3):", audioTest.canPlayType("audio/mp3"));
+
+    // Check assets health
+    fetch("/api/assets-check")
+      .then(res => res.json())
+      .then(data => console.log("Assets Health Check:", data))
+      .catch(err => console.error("Assets Health Check Failed:", err));
+
     // Test if audio files are accessible
     fetch("/assets/ambient.mp3")
-      .then(res => {
-        console.log("Audio fetch test (/assets/ambient.mp3):", res.status, res.statusText, res.headers.get("content-type"));
+      .then(async res => {
+        const contentType = res.headers.get("content-type");
+        console.log("Audio fetch test (/assets/ambient.mp3):", res.status, res.statusText, contentType);
+        if (contentType && contentType.includes("text/html")) {
+          const text = await res.text();
+          console.error("Audio fetch returned HTML instead of MP3! First 100 chars:", text.substring(0, 100));
+        } else {
+          const blob = await res.blob();
+          console.log("Audio fetch success! Size:", blob.size, "bytes");
+          if (blob.size < 100) {
+            console.warn("Audio file seems too small, might be corrupted or empty.");
+          }
+        }
       })
       .catch(err => {
         console.error("Audio fetch test failed:", err);
@@ -52,7 +73,10 @@ export default function App() {
       const audio = new Audio();
       
       audio.addEventListener('error', (e) => {
-        console.error(`Audio error for ${key} (${src}):`, audio.error);
+        console.error(`Audio error for ${key} (${src}):`, {
+          code: audio.error?.code,
+          message: audio.error?.message
+        });
       });
 
       audio.src = src;
@@ -127,7 +151,10 @@ export default function App() {
           }
         });
       } else if (audio.error) {
-        console.error(`Cannot prime ${key} due to error:`, audio.error);
+        console.error(`Cannot prime ${key} due to error:`, {
+          code: audio.error.code,
+          message: audio.error.message
+        });
       }
     });
 
