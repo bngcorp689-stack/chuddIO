@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
-  console.log("Starting server...");
+  console.log("Starting server... NODE_ENV:", process.env.NODE_ENV);
   const app = express();
   const server = http.createServer(app);
   const io = new Server(server);
@@ -306,7 +306,29 @@ async function startServer() {
   }, 1000 / 60);
 
   // Static files from public
-  app.use(express.static(path.join(process.cwd(), "public")));
+  const publicPath = path.resolve(__dirname, "public");
+  console.log("Serving static files from:", publicPath);
+  
+  // Verify assets exist
+  const assetsPath = path.join(publicPath, "assets");
+  if (fs.existsSync(assetsPath)) {
+    const files = fs.readdirSync(assetsPath);
+    console.log("Assets directory found:", files);
+    files.forEach(file => {
+      const filePath = path.join(assetsPath, file);
+      try {
+        const stats = fs.statSync(filePath);
+        console.log(`File: ${file}, Size: ${stats.size} bytes`);
+      } catch (e) {
+        console.error(`Error reading file ${file}:`, e);
+      }
+    });
+  } else {
+    console.error("Assets directory NOT found at:", assetsPath);
+  }
+
+  app.use("/assets", express.static(assetsPath));
+  app.use(express.static(publicPath));
 
   if (process.env.NODE_ENV !== "production") {
     console.log("Initializing Vite in SPA mode...");

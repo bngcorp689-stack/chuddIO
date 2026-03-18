@@ -29,6 +29,15 @@ export default function App() {
   const soundRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
 
   useEffect(() => {
+    // Test if audio files are accessible
+    fetch("/assets/ambient.mp3")
+      .then(res => {
+        console.log("Audio fetch test (/assets/ambient.mp3):", res.status, res.statusText, res.headers.get("content-type"));
+      })
+      .catch(err => {
+        console.error("Audio fetch test failed:", err);
+      });
+
     // Load sounds
     const soundPaths: { [key: string]: string } = {
       eatFood: "/assets/eat-food.mp3",
@@ -40,8 +49,15 @@ export default function App() {
     };
 
     Object.entries(soundPaths).forEach(([key, src]) => {
-      const audio = new Audio(src);
+      const audio = new Audio();
+      
+      audio.addEventListener('error', (e) => {
+        console.error(`Audio error for ${key} (${src}):`, audio.error);
+      });
+
+      audio.src = src;
       audio.preload = "auto";
+      
       if (key === 'ambient') {
         audio.loop = true;
         audio.volume = 0.4;
@@ -98,11 +114,21 @@ export default function App() {
 
   const handleJoin = () => {
     // Prime audio for browser autoplay policy
-    Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
-      audio.play().then(() => {
-        audio.pause();
-        audio.currentTime = 0;
-      }).catch(e => console.warn("Audio priming blocked:", e));
+    Object.entries(soundRefs.current).forEach(([key, audio]) => {
+      if (audio.src && !audio.error) {
+        console.log(`Priming audio: ${key} (${audio.src}) - readyState: ${audio.readyState}`);
+        audio.play().then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+          console.log(`Successfully primed: ${key}`);
+        }).catch(e => {
+          if (e.name !== 'AbortError') {
+            console.warn(`Audio priming failed for ${key}:`, e);
+          }
+        });
+      } else if (audio.error) {
+        console.error(`Cannot prime ${key} due to error:`, audio.error);
+      }
     });
 
     if (!username || !password) {
