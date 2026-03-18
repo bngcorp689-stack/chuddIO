@@ -26,88 +26,47 @@ export default function App() {
     "chadlite", "chad", "adamlite", "adam"
   ];
 
-  const soundRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioBuffersRef = useRef<{ [key: string]: AudioBuffer }>({});
+  const ambientSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const ambientGainRef = useRef<GainNode | null>(null);
 
   useEffect(() => {
-    const audioTest = new Audio();
-    console.log("Audio support check (audio/mpeg):", audioTest.canPlayType("audio/mpeg"));
-    console.log("Audio support check (audio/mp3):", audioTest.canPlayType("audio/mp3"));
+    const initAudio = async () => {
+      try {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        console.log("AudioContext initialized:", audioContextRef.current.state);
+      } catch (e) {
+        console.error("Failed to initialize AudioContext:", e);
+      }
 
-    // Check assets health
-    fetch("/api/assets-check")
-      .then(res => res.json())
-      .then(data => console.log("Assets Health Check:", data))
-      .catch(err => console.error("Assets Health Check Failed:", err));
+      const soundPaths: { [key: string]: string } = {
+        eatFood: "/assets/eat-food.mp3",
+        eatPlayer: "/assets/eat-player.mp3",
+        levelUp: "/assets/level-up.mp3",
+        death: "/assets/death.mp3",
+        boost: "/assets/Boost.mp3",
+        ambient: "/assets/ambient.mp3"
+      };
 
-    // Load sounds
-    const soundPaths: { [key: string]: string } = {
-      eatFood: "/assets/eat-food.mp3",
-      eatPlayer: "/assets/eat-player.mp3",
-      boost: "/assets/Boost.mp3",
-      levelUp: "/assets/level-up.mp3",
-      ambient: "/assets/ambient.mp3",
-      death: "/assets/death.mp3"
+      for (const [key, src] of Object.entries(soundPaths)) {
+        try {
+          const response = await fetch(src);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const arrayBuffer = await response.arrayBuffer();
+          
+          if (audioContextRef.current) {
+            const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+            audioBuffersRef.current[key] = audioBuffer;
+            console.log(`Successfully decoded audio: ${key}`);
+          }
+        } catch (err) {
+          console.error(`Failed to load/decode audio for ${key}:`, err);
+        }
+      }
     };
 
-    Object.entries(soundPaths).forEach(async ([key, src]) => {
-      try {
-        const response = await fetch(src);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("text/html")) {
-          throw new Error("Server returned HTML instead of audio");
-        }
-        
-        const blob = await response.blob();
-        console.log(`Audio blob fetched for ${key}: size=${blob.size}, type=${blob.type}`);
-        const blobUrl = URL.createObjectURL(blob);
-        
-        const audio = new Audio();
-        audio.src = blobUrl;
-        audio.preload = "auto";
-        audio.crossOrigin = "anonymous";
-        
-        // Hidden but in DOM can help some browsers
-        audio.style.position = 'fixed';
-        audio.style.top = '-100px';
-        audio.style.left = '-100px';
-        audio.style.opacity = '0';
-        document.body.appendChild(audio);
-        
-        audio.addEventListener('error', (e) => {
-          const err = audio.error;
-          let codeMsg = "Unknown error";
-          if (err) {
-            const codes = ["", "MEDIA_ERR_ABORTED", "MEDIA_ERR_NETWORK", "MEDIA_ERR_DECODE", "MEDIA_ERR_SRC_NOT_SUPPORTED"];
-            codeMsg = `Code: ${err.code} (${codes[err.code] || "UNKNOWN"}), Msg: ${err.message}`;
-          }
-          console.error(`Audio error for ${key} (${src}):`, codeMsg);
-        });
-
-        // Log state changes
-        audio.addEventListener('loadstart', () => console.log(`${key} loadstart`));
-        audio.addEventListener('loadedmetadata', () => console.log(`${key} loadedmetadata, duration: ${audio.duration}`));
-        audio.addEventListener('canplaythrough', () => console.log(`${key} canplaythrough`));
-
-        if (key === 'ambient') {
-          audio.loop = true;
-          audio.volume = 0.5;
-        } else {
-          audio.volume = 1.0;
-        }
-        
-        audio.muted = true; // Start muted to help with autoplay
-        setTimeout(() => {
-          console.log(`Forcing load for ${key} after delay...`);
-          audio.load();
-        }, 100);
-        
-        soundRefs.current[key] = audio;
-        console.log(`Successfully initialized audio for: ${key}`);
-      } catch (err) {
-        console.error(`Failed to load audio for ${key}:`, err);
-      }
-    });
+    initAudio();
 
     // Load icons - Mapping provided images to levels
     const localPaths: { [key: number]: string } = {
@@ -151,17 +110,11 @@ export default function App() {
     window.addEventListener('keyup', handleKeyUp);
 
     const unlockAudio = () => {
-      console.log("Unlocking audio system via mousedown...");
-      Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
-        if (audio.readyState < 1) audio.load();
-        audio.muted = false;
-        console.log(`Unlocking ${audio.src} (readyState: ${audio.readyState})`);
-        audio.play().then(() => {
-          audio.pause();
-          audio.currentTime = 0;
-          console.log(`Successfully unlocked: ${audio.src}`);
-        }).catch(e => console.warn(`Unlock failed for ${audio.src}:`, e));
-      });
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().then(() => {
+          console.log("AudioContext resumed via interaction");
+        });
+      }
       window.removeEventListener('mousedown', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
     };
@@ -173,69 +126,77 @@ export default function App() {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousedown', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
-      Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
-        audio.pause();
-        if (audio.src.startsWith('blob:')) {
-          URL.revokeObjectURL(audio.src);
-        }
-        if (audio.parentNode) {
-          audio.parentNode.removeChild(audio);
-        }
-      });
+      
+      if (ambientSourceRef.current) {
+        ambientSourceRef.current.stop();
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
     };
   }, []);
+
+  const playSound = (key: string, loop = false, volume = 1.0, forceMuted?: boolean) => {
+    if (!audioContextRef.current || !audioBuffersRef.current[key]) return;
+    
+    const muted = forceMuted !== undefined ? forceMuted : isMuted;
+    
+    // Don't play sound effects if muted
+    if (muted && key !== 'ambient') return;
+
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+
+    const source = audioContextRef.current.createBufferSource();
+    source.buffer = audioBuffersRef.current[key];
+    source.loop = loop;
+
+    const gainNode = audioContextRef.current.createGain();
+    // If muted, set ambient volume to 0
+    gainNode.gain.value = (muted && key === 'ambient') ? 0 : volume;
+
+    source.connect(gainNode);
+    gainNode.connect(audioContextRef.current.destination);
+
+    source.start(0);
+
+    if (key === 'ambient') {
+      if (ambientSourceRef.current) {
+        try { ambientSourceRef.current.stop(); } catch(e) {}
+      }
+      ambientSourceRef.current = source;
+      ambientGainRef.current = gainNode;
+    }
+
+    return { source, gainNode };
+  };
 
   const [isMuted, setIsMuted] = useState(false);
 
   const toggleMute = () => {
     const newMuted = !isMuted;
     setIsMuted(newMuted);
-    Object.values(soundRefs.current).forEach((audio: HTMLAudioElement) => {
-      audio.muted = newMuted;
-    });
+    
+    if (newMuted) {
+      if (ambientGainRef.current) ambientGainRef.current.gain.value = 0;
+    } else {
+      if (ambientGainRef.current) {
+        ambientGainRef.current.gain.value = 0.5;
+      } else {
+        // If ambient wasn't started because it was muted, start it now
+        playSound('ambient', true, 0.5, false);
+      }
+    }
   };
 
   const handleJoin = () => {
-    // Prime audio for browser autoplay policy
-    Object.entries(soundRefs.current).forEach(([key, audio]: [string, HTMLAudioElement]) => {
-      const src = audio.currentSrc || audio.src;
-      if (src && !audio.error) {
-        console.log(`Priming audio: ${key} (${src}) - readyState: ${audio.readyState}`);
-        if (audio.readyState < 1) {
-          console.log(`Forcing load for ${key} because readyState is ${audio.readyState}`);
-          audio.load();
-        }
-        audio.muted = false;
-        if (key !== 'ambient') audio.volume = 1.0;
-        console.log(`Calling play() for ${key}...`);
-        audio.play().then(() => {
-          audio.pause();
-          audio.currentTime = 0;
-          console.log(`Successfully primed: ${key}`);
-          if (key === 'ambient') {
-            audio.volume = 0.5;
-            audio.muted = false;
-            console.log("Starting ambient playback (with delay)...");
-            setTimeout(() => {
-              audio.play().catch(e => console.warn("Failed to play ambient after priming:", e));
-            }, 200);
-          }
-        }).catch(e => {
-          console.error(`Play promise rejected for ${key}:`, e);
-          if (e.name !== 'AbortError') {
-            console.warn(`Audio priming failed for ${key}:`, e);
-          }
-        });
-      } else if (audio.error) {
-        const err = audio.error;
-        let codeMsg = "Unknown error";
-        if (err) {
-          const codes = ["", "MEDIA_ERR_ABORTED", "MEDIA_ERR_NETWORK", "MEDIA_ERR_DECODE", "MEDIA_ERR_SRC_NOT_SUPPORTED"];
-          codeMsg = `Code: ${err.code} (${codes[err.code] || "UNKNOWN"}), Msg: ${err.message}`;
-        }
-        console.error(`Cannot prime ${key} due to error:`, codeMsg);
-      }
-    });
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+
+    // Start ambient
+    playSound('ambient', true, 0.5);
 
     if (!username || !password) {
       setJoinMessage("Username & password required");
@@ -252,14 +213,14 @@ export default function App() {
     newSocket.on("joinSuccess", (data: any) => {
       setJoinMessage("Welcome " + data.username);
       setShowMenu(false);
-      soundRefs.current.ambient?.play().catch(() => {});
+      // Ambient is already started in handleJoin
     });
 
     newSocket.on("joinError", (data: any) => setJoinMessage(data.message));
 
     newSocket.on("dead", () => {
       setShowDeath(true);
-      soundRefs.current.death?.play().catch(() => {});
+      playSound('death');
     });
 
     newSocket.on("respawn", () => {
@@ -268,23 +229,20 @@ export default function App() {
 
     newSocket.on("levelUp", () => {
       setShowLevelUp(true);
-      soundRefs.current.levelUp?.play().catch(() => {});
+      playSound('levelUp');
       setTimeout(() => setShowLevelUp(false), 1500);
     });
 
     newSocket.on("foodEaten", () => {
-      soundRefs.current.eatFood?.play().catch(() => {});
+      playSound('eatFood');
     });
 
     newSocket.on("playerEaten", () => {
-      soundRefs.current.eatPlayer?.play().catch(() => {});
+      playSound('eatPlayer');
     });
 
     newSocket.on("boost", () => {
-      if (soundRefs.current.boost) {
-        soundRefs.current.boost.currentTime = 0;
-        soundRefs.current.boost.play().catch(() => {});
-      }
+      playSound('boost');
     });
 
     newSocket.on("newRound", () => {
@@ -530,14 +488,8 @@ export default function App() {
               </button>
               <button 
                 onClick={() => {
-                  const audio = soundRefs.current['eatFood'];
-                  if (audio) {
-                    console.log("Manual sound test (eatFood)... readyState:", audio.readyState, "muted:", audio.muted, "volume:", audio.volume);
-                    audio.currentTime = 0;
-                    audio.play().then(() => console.log("Manual play success")).catch(e => console.error("Manual play failed:", e));
-                  } else {
-                    console.warn("eatFood audio not found for test");
-                  }
+                  console.log("Manual sound test (eatFood)...");
+                  playSound('eatFood');
                 }}
                 className="text-emerald-500/50 hover:text-emerald-400 text-[10px] transition-colors uppercase tracking-[0.2em] font-bold mt-2"
               >
