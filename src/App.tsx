@@ -58,6 +58,7 @@ export default function App() {
     addLog("Beep started");
   };
   const camera = useRef({ x: 0, y: 0 });
+  const keys = useRef<{ [key: string]: boolean }>({});
   const icons = useRef<{ [key: number]: HTMLImageElement }>({});
   const bgImage = useRef<HTMLImageElement | null>(null);
 
@@ -122,6 +123,11 @@ export default function App() {
             
             const arrayBuffer = await response.arrayBuffer();
             console.log(`${key} fetched buffer size: ${arrayBuffer.byteLength} bytes`);
+
+            const firstBytes = new Uint8Array(arrayBuffer.slice(0, 10));
+            const hex = Array.from(firstBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+            const text = new TextDecoder().decode(firstBytes).replace(/[\x00-\x1F\x7F-\x9F]/g, '.');
+            addLog(`${key} signature: [${hex}] "${text}"`);
 
             if (arrayBuffer.byteLength < 500) {
               const text = new TextDecoder().decode(arrayBuffer.slice(0, 100));
