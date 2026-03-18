@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 export default function App() {
+  console.log("App component rendering...");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [gameState, setGameState] = useState<any>(null);
@@ -427,7 +428,7 @@ export default function App() {
               <p className="text-sm font-mono text-neutral-400 uppercase tracking-widest mb-1">Rank</p>
               <p className="text-2xl font-bold text-emerald-400">
                 {(() => {
-                  const level = gameState?.players?.[socket.id]?.level || 1;
+                  const level = gameState?.players?.[socket?.id || ""]?.level || 1;
                   const name = levelNames[Math.min(Math.max(0, level - 1), 7)];
                   return name.charAt(0).toUpperCase() + name.slice(1);
                 })()}

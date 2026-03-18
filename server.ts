@@ -38,6 +38,42 @@ async function startServer() {
   // Parse JSON requests
   app.use(express.json());
 
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url}`);
+    next();
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    console.log("Initializing Vite in SPA mode...");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+      root: __dirname,
+    });
+    app.use(vite.middlewares);
+    
+    // In development, Vite handles the SPA fallback automatically if appType is 'spa'.
+    // If it doesn't, we can add a simple fallback here.
+    app.use('*', async (req, res, next) => {
+      if (req.method !== 'GET' || !req.headers.accept?.includes('text/html')) {
+        return next();
+      }
+      try {
+        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
+  }
+
+  app.get("/api/ping", (req, res) => {
+    res.json({ status: "ok", time: new Date().toISOString() });
+  });
+
   // ---------------- Reset account ----------------
   app.post("/resetUser", async (req, res) => {
     const { username } = req.body;
@@ -297,32 +333,15 @@ async function startServer() {
   }, 1000 / 60);
 
   // Static files from public
-  app.use(express.static(path.join(__dirname, "public")));
+  app.use(express.static(path.join(process.cwd(), "public")));
 
-  // Vite middleware for development
-  console.log("Initializing Vite...");
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: "spa",
-    root: __dirname,
-  });
-  app.use(vite.middlewares);
-  
-  app.use('*', async (req, res, next) => {
-    const url = req.originalUrl;
-    if (req.method !== 'GET' || (req.headers.accept && !req.headers.accept.includes('text/html'))) {
-      return next();
-    }
-    try {
-      const indexPath = path.resolve(__dirname, 'index.html');
-      let template = fs.readFileSync(indexPath, 'utf-8');
-      template = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-    } catch (e) {
-      vite.ssrFixStacktrace(e as Error);
-      next(e);
-    }
-  });
+  if (process.env.NODE_ENV === "production") {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
 
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
